@@ -10,34 +10,35 @@
 2. **For End Users**: Invest in vaults, withdraw anytime, track PnL
 3. **For Raga**: Protocol-agnostic, non-custodial, scalable infrastructure
 
-## Tech Stack
+## Tech Stack (Simplified)
 
 | Component | Technology |
 |-----------|------------|
 | Monorepo | Turborepo + pnpm |
 | API | NestJS + TypeScript |
-| Database | PostgreSQL + TimescaleDB |
-| Cache/Queue | Redis Streams |
+| Indexer | Ponder (TypeScript) |
+| Database | PostgreSQL (single instance) |
+| Cache | In-memory (node-cache) |
 | SDK | TypeScript |
-| Data Scrapers | Python |
 | Execution Engine | Go (TEE) |
-| Deployment | AWS ECS Fargate |
+| Deployment | Railway / Render |
+
+**Design Philosophy:** Low cost over speed. Single language (TypeScript + Go for TEE).
 
 ## Project Structure
 
 ```
 raga-finance/
 ├── apps/
-│   ├── api/                 # NestJS REST API
-│   ├── data-aggregator/     # Python protocol scrapers
-│   ├── execution-engine/    # Go fund allocation (TEE)
-│   └── vault-deployer/      # Vault deployment bot
+│   ├── api/                 # NestJS REST API (consolidated)
+│   ├── indexer/             # Ponder on-chain indexer
+│   └── execution-engine/    # Go fund allocation (TEE)
 ├── packages/
 │   ├── sdk/                 # @raga-finance/sdk
 │   ├── types/               # @raga-finance/types
 │   ├── contracts/           # ABIs & contract types
 │   └── config/              # Shared configs
-└── infrastructure/          # Terraform, Docker
+└── infrastructure/          # Docker, deployment configs
 ```
 
 ## Supported Protocols (v1)

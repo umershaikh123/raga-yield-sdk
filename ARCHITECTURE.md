@@ -9,6 +9,7 @@ Raga Finance is building a **yield infrastructure layer for Web3 neobanks**, ena
 - **Protocol Agnostic**: Works with any DeFi protocol
 - **Non-Custodial**: Users maintain control of their funds
 - **Scalable**: Easy integration of future chains and protocols
+- **Cost-Effective**: Minimal infrastructure, optimized for low operational cost over speed
 
 ---
 
@@ -93,54 +94,81 @@ Raga Finance is building a **yield infrastructure layer for Web3 neobanks**, ena
 
 ## Tech Stack
 
+### Design Philosophy: Cost Over Speed
+
+This architecture prioritizes **low operational cost** over high performance. We accept slower response times in exchange for minimal infrastructure complexity and cost.
+
+**Trade-offs:**
+- Longer data refresh intervals (acceptable for yield data which changes slowly)
+- Single-instance services instead of auto-scaling clusters
+- In-memory caching instead of distributed cache (initially)
+- Consolidated services instead of microservices
+
 ### Monorepo Structure
 
 This project uses a **Turborepo monorepo** with pnpm for package management.
 
-For detailed project structure, see: [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)
+```
+raga-finance/
+├── apps/
+│   ├── api/                 # NestJS REST API (consolidated)
+│   ├── indexer/             # Ponder indexer
+│   └── execution-engine/    # Go fund allocation (TEE)
+├── packages/
+│   ├── sdk/                 # @raga-finance/sdk
+│   ├── types/               # @raga-finance/types
+│   ├── contracts/           # ABIs & contract types
+│   └── config/              # Shared configs
+└── infrastructure/          # Docker, deployment configs
+```
 
-For design principles and best practices, see: [DESIGN_PRINCIPLES.md](./DESIGN_PRINCIPLES.md)
+### Languages & Frameworks (Simplified)
 
-### Languages & Frameworks
+| Component            | Technology              | Reasoning                                           |
+| -------------------- | ----------------------- | --------------------------------------------------- |
+| **API Service**      | **NestJS + TypeScript** | Single consolidated service for all backend logic   |
+| **Indexer**          | **Ponder**              | TypeScript-based on-chain indexing, replaces Python |
+| **Execution Engine** | Go                      | TEE compatibility for secure key management         |
+| **SDK**              | TypeScript              | Browser + Node.js compatibility                     |
+| **Monorepo**         | Turborepo + pnpm        | Build caching, workspace management                 |
 
-| Component            | Technology              | Reasoning                                                      |
-| -------------------- | ----------------------- | -------------------------------------------------------------- |
-| **API Service**      | **NestJS + TypeScript** | Enterprise-grade, DI, microservices-ready, built-in validation |
-| **Data Workers**     | Python                  | Data processing, protocol adapters                             |
-| **Execution Engine** | Go                      | Performance critical, TEE compatibility                        |
-| **SDK**              | TypeScript              | Browser + Node.js compatibility                                |
-| **Monorepo**         | Turborepo + pnpm        | Build caching, workspace management                            |
+### Why This Stack?
 
-### Why NestJS?
+**Single Language (TypeScript):**
+- Reduced operational complexity
+- Shared types across API, SDK, and indexer
+- Easier hiring and maintenance
+- No Python runtime/dependencies to manage
 
-- **Enterprise Architecture**: Modular, opinionated structure ideal for complex business logic
-- **Dependency Injection**: Built-in DI container for testability and maintainability
-- **Microservices Support**: Native support for Redis, Kafka, RabbitMQ, gRPC
-- **TypeScript First**: Full TypeScript support with decorators
-- **Built-in Features**: Validation, caching, logging, testing utilities
-- **Swagger**: Automatic API documentation generation
+**Ponder for Indexing:**
+- TypeScript-native, fits our stack
+- Built-in database (SQLite/PostgreSQL)
+- Handles on-chain event indexing
+- Automatic reorg handling
+- Lower cost than custom Python scrapers
 
-Reference: [Node.js Frameworks Comparison 2024](https://dev.to/encore/nodejs-frameworks-roundup-2024-elysia-hono-nest-encore-which-should-you-pick-19oj)
+### Database (Simplified)
 
-### Databases
+| Database   | Purpose                                         | Technology                     |
+| ---------- | ----------------------------------------------- | ------------------------------ |
+| Primary DB | Users, vaults, strategies, time-series, configs | PostgreSQL (single instance)   |
+| Cache      | API response caching                            | In-memory (node-cache) → Redis |
 
-| Database       | Purpose                                    | Technology              |
-| -------------- | ------------------------------------------ | ----------------------- |
-| Primary DB     | Users, vaults, strategies, configs         | PostgreSQL (AWS RDS)    |
-| Time-Series DB | APY/TVL history, price data, PnL snapshots | TimescaleDB (AWS RDS)   |
-| Cache          | Hot data, rate limiting, sessions          | Redis (AWS ElastiCache) |
-| Message Queue  | Async job processing                       | Redis Streams           |
+**Note:** We consolidate TimescaleDB into regular PostgreSQL. For time-series queries, we use standard PostgreSQL with proper indexing. This reduces cost and complexity. We can migrate to TimescaleDB later if needed.
 
-### Infrastructure
+### Infrastructure (Minimal)
 
-| Component               | Technology                  | Reasoning                     |
-| ----------------------- | --------------------------- | ----------------------------- |
-| Container Orchestration | AWS ECS + Fargate           | Simpler than K8s, pay-per-use |
-| Load Balancer           | AWS ALB                     | Native ECS integration        |
-| API Gateway             | AWS API Gateway (optional)  | Rate limiting, API keys       |
-| Secrets                 | AWS Secrets Manager         | Secure credential storage     |
-| Monitoring              | AWS CloudWatch + Prometheus | Metrics and alerting          |
-| CI/CD                   | GitHub Actions              | Automated deployments         |
+| Component         | Technology                  | Reasoning                           |
+| ----------------- | --------------------------- | ----------------------------------- |
+| Hosting           | Railway / Render / Fly.io   | Simple deployment, low cost         |
+| Database          | Managed PostgreSQL          | Railway/Render/Supabase             |
+| Secrets           | Environment variables       | Platform-native secret management   |
+| Monitoring        | Platform built-in + Sentry  | Error tracking without extra infra  |
+| CI/CD             | GitHub Actions              | Free for open source                |
+
+**Cost Comparison:**
+- Previous (AWS): ~$500-1000/month minimum
+- Simplified: ~$50-150/month
 
 ---
 
@@ -157,57 +185,47 @@ Reference: [Node.js Frameworks Comparison 2024](https://dev.to/encore/nodejs-fra
             │                     │                     │
             ▼                     ▼                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              AWS VPC                                             │
+│                         SIMPLIFIED INFRASTRUCTURE                                │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
 │  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │                     Application Load Balancer (ALB)                        │  │
-│  │                     - SSL Termination                                      │  │
-│  │                     - Path-based routing                                   │  │
+│  │                     API SERVICE (NestJS - Single Instance)                 │  │
+│  │                                                                            │  │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐  │  │
+│  │  │  REST API   │ │  Auth &     │ │  Data       │ │  Vault Deployer     │  │  │
+│  │  │  Endpoints  │ │  Rate Limit │ │  Normalizer │ │  (integrated)       │  │  │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────────────┘  │  │
+│  │                                                                            │  │
+│  │  ┌─────────────────────────────────────────────────────────────────────┐  │  │
+│  │  │                     In-Memory Cache (node-cache)                     │  │  │
+│  │  └─────────────────────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                           │
+│  ┌───────────────────────────────────┴───────────────────────────────────────┐  │
+│  │                                                                            │  │
+│  │  ┌──────────────────────────────┐      ┌────────────────────────────────┐ │  │
+│  │  │     PONDER INDEXER           │      │     EXECUTION ENGINE (Go)      │ │  │
+│  │  │     (TypeScript)             │      │                                │ │  │
+│  │  │                              │      │     - Fund allocation          │ │  │
+│  │  │  - On-chain event indexing   │      │     - Withdrawal processing    │ │  │
+│  │  │  - Vault deposits/withdraws  │      │     - Rebalancing              │ │  │
+│  │  │  - Position tracking         │      │     - TEE secured signing      │ │  │
+│  │  │  - Protocol data sync        │      │                                │ │  │
+│  │  │  - Historical snapshots      │      │     (Runs separately in TEE)   │ │  │
+│  │  └──────────────────────────────┘      └────────────────────────────────┘ │  │
+│  │                                                                            │  │
 │  └───────────────────────────────────────────────────────────────────────────┘  │
 │                                      │                                           │
 │                                      ▼                                           │
 │  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │                         ECS CLUSTER (Fargate)                              │  │
+│  │                     POSTGRESQL (Single Instance)                           │  │
 │  │                                                                            │  │
-│  │  ┌─────────────────────────────────────────────────────────────────────┐  │  │
-│  │  │                     API SERVICE (Node.js/TypeScript)                 │  │  │
-│  │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐   │  │  │
-│  │  │  │  Instance 1 │ │  Instance 2 │ │  Instance 3 │ │  Instance N │   │  │  │
-│  │  │  │  - REST API │ │  - REST API │ │  - REST API │ │  - REST API │   │  │  │
-│  │  │  │  - Auth     │ │  - Auth     │ │  - Auth     │ │  - Auth     │   │  │  │
-│  │  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘   │  │  │
-│  │  └─────────────────────────────────────────────────────────────────────┘  │  │
-│  │                                                                            │  │
-│  │  ┌──────────────────────┐  ┌──────────────────────┐  ┌─────────────────┐  │  │
-│  │  │  DATA AGGREGATION    │  │  PORTFOLIO TRACKER   │  │ EXECUTION       │  │  │
-│  │  │  SERVICE (Python)    │  │  SERVICE (Node.js)   │  │ ENGINE (Go)     │  │  │
-│  │  │                      │  │                      │  │                 │  │  │
-│  │  │  - Protocol scrapers │  │  - Event indexing    │  │ - Fund alloc    │  │  │
-│  │  │  - Data normalizer   │  │  - Position tracking │  │ - Rebalancing   │  │  │
-│  │  │  - Risk calculator   │  │  - PnL computation   │  │ - TEE secured   │  │  │
-│  │  └──────────────────────┘  └──────────────────────┘  └─────────────────┘  │  │
-│  │                                                                            │  │
-│  │  ┌─────────────────────────────────────────────────────────────────────┐  │  │
-│  │  │                     VAULT DEPLOYER BOT (Node.js)                     │  │  │
-│  │  │  - Factory contract interaction                                      │  │  │
-│  │  │  - Vault configuration                                               │  │  │
-│  │  │  - Strategy setup                                                    │  │  │
-│  │  └─────────────────────────────────────────────────────────────────────┘  │  │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐  │  │
+│  │  │   users     │ │  strategies │ │   vaults    │ │  ponder_* tables    │  │  │
+│  │  │   neobanks  │ │  protocols  │ │  positions  │ │  (auto-generated)   │  │  │
+│  │  │             │ │  tokens     │ │  txns       │ │                     │  │  │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────────────┘  │
-│                                      │                                           │
-│              ┌───────────────────────┼───────────────────────┐                  │
-│              ▼                       ▼                       ▼                  │
-│  ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐       │
-│  │   REDIS CLUSTER     │ │   POSTGRESQL        │ │   TIMESCALEDB       │       │
-│  │   (ElastiCache)     │ │   (RDS)             │ │   (RDS)             │       │
-│  │                     │ │                     │ │                     │       │
-│  │   - Cache layer     │ │   - users           │ │   - strategy_metrics│       │
-│  │   - Rate limiting   │ │   - neobanks        │ │   - vault_metrics   │       │
-│  │   - Session store   │ │   - vaults          │ │   - token_prices    │       │
-│  │   - Message queue   │ │   - strategies      │ │   - portfolio_snaps │       │
-│  │   - Pub/Sub         │ │   - allocations     │ │   - apy_history     │       │
-│  └─────────────────────┘ └─────────────────────┘ └─────────────────────┘       │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                        │
@@ -215,19 +233,14 @@ Reference: [Node.js Frameworks Comparison 2024](https://dev.to/encore/nodejs-fra
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                           EXTERNAL DATA SOURCES                                  │
 │                                                                                  │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐               │
-│  │  DeFiLlama  │ │  Aavescan   │ │   Morpho    │ │   Pendle    │               │
-│  │     API     │ │     API     │ │  GraphQL    │ │    API      │               │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘               │
-│                                                                                  │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐               │
-│  │    Lido     │ │   Euler     │ │   Spectra   │ │  CoinGecko  │               │
-│  │     API     │ │  Subgraph   │ │  Vision API │ │  (prices)   │               │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘               │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │                    PROTOCOL APIs (fetched by API service)                │   │
+│  │   DeFiLlama │ Morpho GraphQL │ Pendle API │ Lido API │ CoinGecko        │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                  │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │                         BLOCKCHAIN RPC NODES                             │   │
-│  │   Ethereum (Alchemy/Infura) │ Base │ BSC │ Arbitrum                     │   │
+│  │                    BLOCKCHAIN RPC (used by Ponder)                       │   │
+│  │   Ethereum │ Base │ BSC │ Arbitrum (via Alchemy/public RPCs)            │   │
 │  └─────────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -236,76 +249,163 @@ Reference: [Node.js Frameworks Comparison 2024](https://dev.to/encore/nodejs-fra
 
 ## Backend Services
 
-### 1. API Service (Node.js/TypeScript)
+### 1. API Service (NestJS - Consolidated)
 
-**Purpose**: Main REST API serving all client requests
+**Purpose**: Single backend service handling all API requests, data fetching, and business logic
 
 **Responsibilities**:
 
 - REST API endpoints (public and authenticated)
 - API key authentication and validation
-- Rate limiting (per API key)
-- Request validation and sanitization
-- Response caching
-- Unified error handling
+- Rate limiting (in-memory, per API key)
+- Protocol data fetching (from external APIs)
+- Data normalization (APY/APR standardization)
+- Risk score computation
+- Vault deployment orchestration
 - Webhook dispatch
+
+**Consolidated Components** (previously separate services):
+- Data Aggregation (was Python) → TypeScript modules
+- Portfolio Tracking → Uses Ponder indexed data
+- Vault Deployer Bot → Integrated as a module
 
 **Tech Stack**:
 
-- Framework: Hono or nest.js
-- Validation: Zod
-- ORM: Prisma or Drizzle
-- API Docs: Swagger
+- Framework: NestJS
+- Validation: class-validator + class-transformer
+- ORM: Prisma
+- Cache: node-cache (in-memory)
+- API Docs: Swagger (@nestjs/swagger)
+- HTTP Client: axios
 
-### 2. Data Aggregation Service (Python)
+**Module Structure**:
 
-**Purpose**: Fetch, normalize, and store protocol data
+```
+apps/api/src/
+├── modules/
+│   ├── strategies/          # Strategy discovery & data
+│   │   ├── strategies.controller.ts
+│   │   ├── strategies.service.ts
+│   │   └── fetchers/        # Protocol-specific data fetchers
+│   │       ├── aave.fetcher.ts
+│   │       ├── morpho.fetcher.ts
+│   │       ├── pendle.fetcher.ts
+│   │       ├── euler.fetcher.ts
+│   │       ├── spectra.fetcher.ts
+│   │       ├── lido.fetcher.ts
+│   │       └── defillama.fetcher.ts  # Fallback
+│   ├── vaults/              # Vault management
+│   ├── users/               # User & neobank management
+│   ├── portfolio/           # Portfolio (reads from Ponder)
+│   ├── transactions/        # Transaction preparation
+│   └── deployer/            # Vault deployment
+├── common/
+│   ├── cache/               # In-memory caching
+│   ├── normalizers/         # Data normalization utilities
+│   └── guards/              # Auth guards
+└── config/
+```
+
+### 2. Ponder Indexer (TypeScript)
+
+**Purpose**: Index on-chain events for portfolio tracking and vault metrics
+
+**Why Ponder?**
+- TypeScript-native (no Python)
+- Built-in SQLite/PostgreSQL support
+- Automatic reorg handling
+- Type-safe event handlers
+- Lower operational complexity
 
 **Responsibilities**:
 
-- Protocol-specific scrapers/adapters
-- Data normalization (APY/APR standardization)
-- Risk score computation
-- Time-series data storage
-- Fallback handling (DeFiLlama)
+- Index vault deposit/withdrawal events
+- Track user positions on-chain
+- Store historical share prices
+- Monitor vault TVL changes
+- Index protocol-specific events as needed
 
-**Components**:
+**What Ponder Indexes**:
 
+```typescript
+// ponder.config.ts
+export default {
+  networks: {
+    ethereum: { chainId: 1, rpc: process.env.ETH_RPC_URL },
+    base: { chainId: 8453, rpc: process.env.BASE_RPC_URL },
+    bsc: { chainId: 56, rpc: process.env.BSC_RPC_URL },
+    arbitrum: { chainId: 42161, rpc: process.env.ARB_RPC_URL },
+  },
+  contracts: {
+    RagaVault: {
+      abi: RagaVaultABI,
+      network: "ethereum",
+      address: factory.getDeployedVaults(), // Dynamic
+      startBlock: 19000000,
+    },
+  },
+};
 ```
-data-aggregation/
-├── scrapers/
-│   ├── aave_scraper.py
-│   ├── morpho_scraper.py
-│   ├── pendle_scraper.py
-│   ├── euler_scraper.py
-│   ├── spectra_scraper.py
-│   └── lido_scraper.py
-├── normalizers/
-│   ├── apy_normalizer.py
-│   ├── token_normalizer.py
-│   └── risk_calculator.py
-├── scheduler/
-│   └── job_scheduler.py
-└── storage/
-    └── timeseries_writer.py
+
+**Indexed Events**:
+- `Deposit(address user, uint256 assets, uint256 shares)`
+- `Withdraw(address user, uint256 assets, uint256 shares)`
+- `Transfer(address from, address to, uint256 shares)`
+- `StrategyAllocationUpdated(...)`
+
+**Ponder Schema**:
+
+```typescript
+// ponder.schema.ts
+import { createSchema } from "@ponder/core";
+
+export default createSchema((p) => ({
+  VaultDeposit: p.createTable({
+    id: p.string(),
+    vault: p.string(),
+    user: p.string(),
+    assets: p.bigint(),
+    shares: p.bigint(),
+    timestamp: p.int(),
+    blockNumber: p.int(),
+    txHash: p.string(),
+  }),
+
+  VaultWithdraw: p.createTable({
+    id: p.string(),
+    vault: p.string(),
+    user: p.string(),
+    assets: p.bigint(),
+    shares: p.bigint(),
+    timestamp: p.int(),
+    blockNumber: p.int(),
+    txHash: p.string(),
+  }),
+
+  UserPosition: p.createTable({
+    id: p.string(),           // `${vault}-${user}`
+    vault: p.string(),
+    user: p.string(),
+    shares: p.bigint(),
+    totalDeposited: p.bigint(),
+    totalWithdrawn: p.bigint(),
+    lastUpdated: p.int(),
+  }),
+
+  VaultSnapshot: p.createTable({
+    id: p.string(),           // `${vault}-${timestamp}`
+    vault: p.string(),
+    totalAssets: p.bigint(),
+    totalShares: p.bigint(),
+    sharePrice: p.bigint(),   // Scaled by 1e18
+    timestamp: p.int(),
+  }),
+}));
 ```
 
-### 3. Portfolio Tracking Service (Node.js/TypeScript)
+### 3. Execution Engine (Go)
 
-**Purpose**: Track user positions and compute PnL
-
-**Responsibilities**:
-
-- On-chain event indexing (deposits, withdrawals)
-- Real-time position tracking
-- Balance aggregation across chains
-- PnL computation
-- Cost basis tracking
-- Portfolio snapshots
-
-### 4. Execution Engine (Go)
-
-**Purpose**: Execute vault operations securely
+**Purpose**: Execute vault operations securely in TEE
 
 **Responsibilities**:
 
@@ -318,393 +418,398 @@ data-aggregation/
 
 **Security**: Runs in Trusted Execution Environment (TEE)
 
-### 5. Vault Deployer Bot (Node.js/TypeScript)
-
-**Purpose**: Automate vault deployment for neobanks
-
-**Responsibilities**:
-
-- Interact with vault factory contract
-- Deploy new vault instances
-- Configure vault parameters
-- Set up strategy allocations
-- Register vault in database
-- Generate API keys for neobank
+**Note**: This remains in Go for TEE compatibility. It's the only non-TypeScript component.
 
 ---
 
 ## Data Sources
 
-### Protocol Data Sources
+### Protocol Data Fetching Strategy
 
-| Protocol    | Primary Source   | Endpoint                                             | Update Freq | Rate Limit       |
-| ----------- | ---------------- | ---------------------------------------------------- | ----------- | ---------------- |
-| **Aave**    | Aavescan API     | `https://api.aavescan.com/v2/reserves/latest`        | 5 min       | API key required |
-| **Morpho**  | Morpho GraphQL   | `https://api.morpho.org/graphql`                     | 5 min       | 5k req/5min      |
-| **Pendle**  | Pendle V2 API    | `https://api-v2.pendle.finance/core/`                | 5 min       | 100 CU/min       |
-| **Euler**   | Goldsky Subgraph | Euler subgraph endpoint                              | 5-10 min    | Generous         |
-| **Spectra** | Vision API       | `vision.perspective.fi`                              | 10 min      | TBD              |
-| **Lido**    | Lido API         | `https://eth-api.lido.fi/v1/protocol/steth/apr/last` | 30 min      | Generous         |
+Instead of Python scrapers, we fetch protocol data directly in the API service using TypeScript:
 
-### Fallback & Aggregated Data
+| Protocol    | Primary Source   | Fetcher Module         | Update Freq | Caching   |
+| ----------- | ---------------- | ---------------------- | ----------- | --------- |
+| **Aave**    | Aavescan API     | `aave.fetcher.ts`      | 10 min      | 10 min    |
+| **Morpho**  | Morpho GraphQL   | `morpho.fetcher.ts`    | 10 min      | 10 min    |
+| **Pendle**  | Pendle V2 API    | `pendle.fetcher.ts`    | 10 min      | 10 min    |
+| **Euler**   | Goldsky Subgraph | `euler.fetcher.ts`     | 15 min      | 15 min    |
+| **Spectra** | Vision API       | `spectra.fetcher.ts`   | 15 min      | 15 min    |
+| **Lido**    | Lido API         | `lido.fetcher.ts`      | 30 min      | 30 min    |
+| **Fallback**| DeFiLlama        | `defillama.fetcher.ts` | As needed   | 15 min    |
 
-| Source           | Purpose           | Endpoint                            |
-| ---------------- | ----------------- | ----------------------------------- |
-| DeFiLlama        | TVL, APY fallback | `https://api.llama.fi/`             |
-| DeFiLlama Yields | Yield data        | `https://yields.llama.fi/`          |
-| CoinGecko        | Token prices      | `https://api.coingecko.com/api/v3/` |
+**Longer update intervals** = lower API costs and simpler caching (acceptable trade-off since yield data doesn't change rapidly)
 
-### RPC Providers
+### On-Chain Data (via Ponder)
 
-| Chain    | Primary   | Fallback  |
-| -------- | --------- | --------- |
-| Ethereum | Alchemy   | Infura    |
-| Base     | Alchemy   | QuickNode |
-| BSC      | QuickNode | NodeReal  |
-| Arbitrum | Alchemy   | Infura    |
+| Data Type         | Source              | Update Method      |
+| ----------------- | ------------------- | ------------------ |
+| Vault Deposits    | Contract events     | Real-time indexing |
+| Vault Withdrawals | Contract events     | Real-time indexing |
+| User Positions    | Computed from events| Real-time          |
+| Share Prices      | Contract calls      | Periodic snapshots |
+
+### RPC Providers (Cost-Optimized)
+
+| Chain    | Provider          | Notes                      |
+| -------- | ----------------- | -------------------------- |
+| Ethereum | Alchemy (free)    | 300M CU/month free tier    |
+| Base     | Alchemy (free)    | Shared quota               |
+| BSC      | Public RPC        | Free, reliable enough      |
+| Arbitrum | Alchemy (free)    | Shared quota               |
+
+**Note**: Start with free tiers, upgrade only when needed
 
 ---
 
 ## Database Design
 
-### PostgreSQL Schema
+### Simplified Schema (PostgreSQL Only)
 
-```sql
--- =====================
--- CORE ENTITIES
--- =====================
+We use a single PostgreSQL instance for all data, including time-series. This reduces complexity and cost. For time-series queries, we use standard PostgreSQL with proper indexing and periodic cleanup jobs.
 
--- Neobank accounts (B2B customers)
-CREATE TABLE neobanks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    api_key VARCHAR(64) UNIQUE NOT NULL,
-    api_key_hash VARCHAR(256) NOT NULL,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+**Note:** Ponder creates its own tables automatically for indexed on-chain data. The schema below is for our application data.
 
--- End users (neobank customers)
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    neobank_id UUID REFERENCES neobanks(id),
-    external_id VARCHAR(255), -- neobank's user identifier
-    wallet_address VARCHAR(42),
-    email VARCHAR(255),
-    name VARCHAR(255),
-    is_verified BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(neobank_id, external_id)
-);
+### Prisma Schema
 
--- Supported blockchains
-CREATE TABLE chains (
-    id INTEGER PRIMARY KEY, -- chain ID
-    name VARCHAR(50) NOT NULL,
-    rpc_url VARCHAR(255) NOT NULL,
-    explorer_url VARCHAR(255),
-    is_active BOOLEAN DEFAULT true,
-    block_time_ms INTEGER DEFAULT 12000
-);
+```prisma
+// schema.prisma
 
--- DeFi protocols
-CREATE TABLE protocols (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
-    slug VARCHAR(50) UNIQUE NOT NULL,
-    logo_url VARCHAR(255),
-    website_url VARCHAR(255),
-    description TEXT,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+generator client {
+  provider = "prisma-client-js"
+}
 
--- Tokens
-CREATE TABLE tokens (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    chain_id INTEGER REFERENCES chains(id),
-    address VARCHAR(42) NOT NULL,
-    symbol VARCHAR(20) NOT NULL,
-    name VARCHAR(100),
-    decimals INTEGER NOT NULL,
-    logo_url VARCHAR(255),
-    coingecko_id VARCHAR(100),
-    UNIQUE(chain_id, address)
-);
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
--- =====================
--- STRATEGIES
--- =====================
+// =====================
+// CORE ENTITIES
+// =====================
 
--- Yield strategies (pools, vaults from protocols)
-CREATE TABLE strategies (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    identifier VARCHAR(100) UNIQUE NOT NULL, -- external identifier
-    protocol_id UUID REFERENCES protocols(id),
-    chain_id INTEGER REFERENCES chains(id),
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    strategy_type VARCHAR(50) NOT NULL, -- 'lending', 'staking', 'lp', 'vault', etc.
-    contract_address VARCHAR(42) NOT NULL,
-    deposit_token_id UUID REFERENCES tokens(id),
+model Neobank {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  apiKey      String   @unique @map("api_key")
+  apiKeyHash  String   @map("api_key_hash")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-    -- Current metrics (updated by scraper)
-    current_apy DECIMAL(10, 4),
-    reward_apy DECIMAL(10, 4),
-    total_apy DECIMAL(10, 4),
-    tvl_usd DECIMAL(20, 2),
-    utilization_rate DECIMAL(5, 4),
+  users  User[]
+  vaults Vault[]
 
-    -- Risk metrics
-    risk_score INTEGER CHECK (risk_score BETWEEN 1 AND 10),
-    risk_profile VARCHAR(20), -- 'low', 'medium', 'high'
+  @@map("neobanks")
+}
 
-    -- Metadata
-    is_active BOOLEAN DEFAULT true,
-    last_updated TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+model User {
+  id            String   @id @default(cuid())
+  neobankId     String   @map("neobank_id")
+  externalId    String?  @map("external_id")
+  walletAddress String?  @map("wallet_address")
+  email         String?
+  name          String?
+  isVerified    Boolean  @default(false) @map("is_verified")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
--- =====================
--- VAULTS
--- =====================
+  neobank      Neobank       @relation(fields: [neobankId], references: [id])
+  positions    UserPosition[]
+  transactions Transaction[]
 
--- Neobank vaults (deployed via factory)
-CREATE TABLE vaults (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    neobank_id UUID REFERENCES neobanks(id),
-    chain_id INTEGER REFERENCES chains(id),
+  @@unique([neobankId, externalId])
+  @@map("users")
+}
 
-    -- Contract info
-    vault_address VARCHAR(42) NOT NULL,
-    bot_address VARCHAR(42) NOT NULL,
+model Chain {
+  id          Int      @id // chain ID
+  name        String
+  rpcUrl      String   @map("rpc_url")
+  explorerUrl String?  @map("explorer_url")
+  isActive    Boolean  @default(true) @map("is_active")
 
-    -- Metadata
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    vault_type VARCHAR(50),
+  tokens     Token[]
+  strategies Strategy[]
+  vaults     Vault[]
 
-    -- Current metrics
-    current_apy DECIMAL(10, 4),
-    tvl_usd DECIMAL(20, 2),
-    share_price DECIMAL(30, 18),
-    total_shares DECIMAL(30, 18),
+  @@map("chains")
+}
 
-    -- Risk
-    risk_profile VARCHAR(20),
+model Protocol {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  logoUrl     String?  @map("logo_url")
+  websiteUrl  String?  @map("website_url")
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-    -- Status
-    status VARCHAR(20) DEFAULT 'active', -- 'deploying', 'active', 'paused', 'deprecated'
-    is_testnet BOOLEAN DEFAULT false,
+  strategies Strategy[]
 
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
+  @@map("protocols")
+}
 
-    UNIQUE(chain_id, vault_address)
-);
+model Token {
+  id          String  @id @default(cuid())
+  chainId     Int     @map("chain_id")
+  address     String
+  symbol      String
+  name        String?
+  decimals    Int
+  logoUrl     String? @map("logo_url")
+  coingeckoId String? @map("coingecko_id")
 
--- Vault strategy allocations
-CREATE TABLE vault_allocations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vault_id UUID REFERENCES vaults(id),
-    strategy_id UUID REFERENCES strategies(id),
-    allocation_percentage DECIMAL(5, 2) NOT NULL CHECK (allocation_percentage >= 0 AND allocation_percentage <= 100),
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(vault_id, strategy_id)
-);
+  chain      Chain      @relation(fields: [chainId], references: [id])
+  strategies Strategy[]
 
--- =====================
--- USER POSITIONS
--- =====================
+  @@unique([chainId, address])
+  @@map("tokens")
+}
 
--- User deposits/positions
-CREATE TABLE user_positions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    vault_id UUID REFERENCES vaults(id),
+// =====================
+// STRATEGIES
+// =====================
 
-    -- Position data
-    shares DECIMAL(30, 18) NOT NULL DEFAULT 0,
-    cost_basis_usd DECIMAL(20, 2) DEFAULT 0,
+model Strategy {
+  id              String   @id @default(cuid())
+  identifier      String   @unique
+  protocolId      String   @map("protocol_id")
+  chainId         Int      @map("chain_id")
+  name            String
+  description     String?
+  strategyType    String   @map("strategy_type")
+  contractAddress String   @map("contract_address")
+  depositTokenId  String?  @map("deposit_token_id")
 
-    -- Tracking
-    total_deposited_usd DECIMAL(20, 2) DEFAULT 0,
-    total_withdrawn_usd DECIMAL(20, 2) DEFAULT 0,
+  // Current metrics (cached from API fetches)
+  currentApy      Decimal? @map("current_apy") @db.Decimal(10, 4)
+  rewardApy       Decimal? @map("reward_apy") @db.Decimal(10, 4)
+  totalApy        Decimal? @map("total_apy") @db.Decimal(10, 4)
+  tvlUsd          Decimal? @map("tvl_usd") @db.Decimal(20, 2)
+  utilizationRate Decimal? @map("utilization_rate") @db.Decimal(5, 4)
 
-    first_deposit_at TIMESTAMPTZ,
-    last_activity_at TIMESTAMPTZ,
+  // Risk
+  riskScore   Int?    @map("risk_score")
+  riskProfile String? @map("risk_profile")
 
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
+  isActive    Boolean   @default(true) @map("is_active")
+  lastUpdated DateTime? @map("last_updated")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
-    UNIQUE(user_id, vault_id)
-);
+  protocol     Protocol          @relation(fields: [protocolId], references: [id])
+  chain        Chain             @relation(fields: [chainId], references: [id])
+  depositToken Token?            @relation(fields: [depositTokenId], references: [id])
+  allocations  VaultAllocation[]
+  snapshots    StrategySnapshot[]
 
--- Transaction history
-CREATE TABLE transactions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    vault_id UUID REFERENCES vaults(id),
-    chain_id INTEGER REFERENCES chains(id),
+  @@map("strategies")
+}
 
-    -- Transaction details
-    tx_hash VARCHAR(66) NOT NULL,
-    tx_type VARCHAR(20) NOT NULL, -- 'deposit', 'withdraw', 'claim'
-    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'confirmed', 'failed'
+// =====================
+// VAULTS
+// =====================
 
-    -- Amounts
-    amount DECIMAL(30, 18),
-    amount_usd DECIMAL(20, 2),
-    shares DECIMAL(30, 18),
-    share_price DECIMAL(30, 18),
+model Vault {
+  id           String @id @default(cuid())
+  neobankId    String @map("neobank_id")
+  chainId      Int    @map("chain_id")
+  vaultAddress String @map("vault_address")
+  botAddress   String @map("bot_address")
 
-    -- Timestamps
-    submitted_at TIMESTAMPTZ DEFAULT NOW(),
-    confirmed_at TIMESTAMPTZ,
-    block_number BIGINT,
+  name        String
+  description String?
+  vaultType   String? @map("vault_type")
 
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+  // Current metrics
+  currentApy  Decimal? @map("current_apy") @db.Decimal(10, 4)
+  tvlUsd      Decimal? @map("tvl_usd") @db.Decimal(20, 2)
+  sharePrice  Decimal? @map("share_price") @db.Decimal(30, 18)
+  totalShares Decimal? @map("total_shares") @db.Decimal(30, 18)
 
--- =====================
--- INDEXES
--- =====================
+  riskProfile String? @map("risk_profile")
+  status      String  @default("active")
+  isTestnet   Boolean @default(false) @map("is_testnet")
 
-CREATE INDEX idx_strategies_protocol ON strategies(protocol_id);
-CREATE INDEX idx_strategies_chain ON strategies(chain_id);
-CREATE INDEX idx_strategies_type ON strategies(strategy_type);
-CREATE INDEX idx_strategies_active ON strategies(is_active) WHERE is_active = true;
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-CREATE INDEX idx_vaults_neobank ON vaults(neobank_id);
-CREATE INDEX idx_vaults_chain ON vaults(chain_id);
-CREATE INDEX idx_vaults_status ON vaults(status);
+  neobank      Neobank           @relation(fields: [neobankId], references: [id])
+  chain        Chain             @relation(fields: [chainId], references: [id])
+  allocations  VaultAllocation[]
+  positions    UserPosition[]
+  transactions Transaction[]
+  snapshots    VaultSnapshot[]
 
-CREATE INDEX idx_user_positions_user ON user_positions(user_id);
-CREATE INDEX idx_user_positions_vault ON user_positions(vault_id);
+  @@unique([chainId, vaultAddress])
+  @@map("vaults")
+}
 
-CREATE INDEX idx_transactions_user ON transactions(user_id);
-CREATE INDEX idx_transactions_vault ON transactions(vault_id);
-CREATE INDEX idx_transactions_hash ON transactions(tx_hash);
-CREATE INDEX idx_transactions_status ON transactions(status);
+model VaultAllocation {
+  id                   String  @id @default(cuid())
+  vaultId              String  @map("vault_id")
+  strategyId           String  @map("strategy_id")
+  allocationPercentage Decimal @map("allocation_percentage") @db.Decimal(5, 2)
+  isActive             Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  vault    Vault    @relation(fields: [vaultId], references: [id])
+  strategy Strategy @relation(fields: [strategyId], references: [id])
+
+  @@unique([vaultId, strategyId])
+  @@map("vault_allocations")
+}
+
+// =====================
+// USER POSITIONS (synced from Ponder)
+// =====================
+
+model UserPosition {
+  id      String @id @default(cuid())
+  userId  String @map("user_id")
+  vaultId String @map("vault_id")
+
+  shares           Decimal  @default(0) @db.Decimal(30, 18)
+  costBasisUsd     Decimal  @default(0) @map("cost_basis_usd") @db.Decimal(20, 2)
+  totalDepositedUsd Decimal @default(0) @map("total_deposited_usd") @db.Decimal(20, 2)
+  totalWithdrawnUsd Decimal @default(0) @map("total_withdrawn_usd") @db.Decimal(20, 2)
+
+  firstDepositAt DateTime? @map("first_deposit_at")
+  lastActivityAt DateTime? @map("last_activity_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  vault Vault @relation(fields: [vaultId], references: [id])
+
+  @@unique([userId, vaultId])
+  @@map("user_positions")
+}
+
+model Transaction {
+  id      String @id @default(cuid())
+  userId  String @map("user_id")
+  vaultId String @map("vault_id")
+  chainId Int    @map("chain_id")
+
+  txHash     String @map("tx_hash")
+  txType     String @map("tx_type")
+  status     String @default("pending")
+
+  amount     Decimal? @db.Decimal(30, 18)
+  amountUsd  Decimal? @map("amount_usd") @db.Decimal(20, 2)
+  shares     Decimal? @db.Decimal(30, 18)
+  sharePrice Decimal? @map("share_price") @db.Decimal(30, 18)
+
+  submittedAt DateTime  @default(now()) @map("submitted_at")
+  confirmedAt DateTime? @map("confirmed_at")
+  blockNumber BigInt?   @map("block_number")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  vault Vault @relation(fields: [vaultId], references: [id])
+
+  @@index([txHash])
+  @@map("transactions")
+}
+
+// =====================
+// TIME-SERIES (Simple PostgreSQL)
+// =====================
+
+model StrategySnapshot {
+  id         String   @id @default(cuid())
+  strategyId String   @map("strategy_id")
+  timestamp  DateTime
+
+  apy        Decimal? @db.Decimal(10, 4)
+  rewardApy  Decimal? @map("reward_apy") @db.Decimal(10, 4)
+  totalApy   Decimal? @map("total_apy") @db.Decimal(10, 4)
+  tvlUsd     Decimal? @map("tvl_usd") @db.Decimal(20, 2)
+
+  strategy Strategy @relation(fields: [strategyId], references: [id])
+
+  @@index([strategyId, timestamp(sort: Desc)])
+  @@map("strategy_snapshots")
+}
+
+model VaultSnapshot {
+  id        String   @id @default(cuid())
+  vaultId   String   @map("vault_id")
+  timestamp DateTime
+
+  apy         Decimal? @db.Decimal(10, 4)
+  tvlUsd      Decimal? @map("tvl_usd") @db.Decimal(20, 2)
+  sharePrice  Decimal? @map("share_price") @db.Decimal(30, 18)
+  totalShares Decimal? @map("total_shares") @db.Decimal(30, 18)
+
+  vault Vault @relation(fields: [vaultId], references: [id])
+
+  @@index([vaultId, timestamp(sort: Desc)])
+  @@map("vault_snapshots")
+}
+
+model TokenPrice {
+  id        String   @id @default(cuid())
+  tokenId   String   @map("token_id")
+  timestamp DateTime
+  priceUsd  Decimal  @map("price_usd") @db.Decimal(20, 8)
+
+  @@index([tokenId, timestamp(sort: Desc)])
+  @@map("token_prices")
+}
 ```
 
-### TimescaleDB Schema
+### Data Cleanup (Cron Job)
 
-```sql
--- Enable TimescaleDB extension
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+Since we don't use TimescaleDB retention policies, we run a simple cleanup job:
 
--- =====================
--- TIME-SERIES TABLES
--- =====================
+```typescript
+// src/jobs/cleanup.job.ts
+@Injectable()
+export class CleanupJob {
+  constructor(private prisma: PrismaService) {}
 
--- Strategy metrics over time
-CREATE TABLE strategy_metrics (
-    time TIMESTAMPTZ NOT NULL,
-    strategy_id UUID NOT NULL,
-    apy DECIMAL(10, 4),
-    reward_apy DECIMAL(10, 4),
-    total_apy DECIMAL(10, 4),
-    tvl_usd DECIMAL(20, 2),
-    utilization_rate DECIMAL(5, 4),
-    borrow_apy DECIMAL(10, 4),
-    supply_apy DECIMAL(10, 4)
-);
+  // Run daily via cron
+  @Cron('0 3 * * *') // 3 AM daily
+  async cleanupOldSnapshots() {
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-SELECT create_hypertable('strategy_metrics', 'time');
-CREATE INDEX idx_strategy_metrics_strategy ON strategy_metrics(strategy_id, time DESC);
+    await this.prisma.strategySnapshot.deleteMany({
+      where: { timestamp: { lt: ninetyDaysAgo } },
+    });
 
--- Vault metrics over time
-CREATE TABLE vault_metrics (
-    time TIMESTAMPTZ NOT NULL,
-    vault_id UUID NOT NULL,
-    apy DECIMAL(10, 4),
-    tvl_usd DECIMAL(20, 2),
-    share_price DECIMAL(30, 18),
-    total_shares DECIMAL(30, 18)
-);
+    await this.prisma.tokenPrice.deleteMany({
+      where: { timestamp: { lt: ninetyDaysAgo } },
+    });
 
-SELECT create_hypertable('vault_metrics', 'time');
-CREATE INDEX idx_vault_metrics_vault ON vault_metrics(vault_id, time DESC);
+    // Keep vault snapshots longer (1 year)
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
--- Token prices
-CREATE TABLE token_prices (
-    time TIMESTAMPTZ NOT NULL,
-    token_id UUID NOT NULL,
-    price_usd DECIMAL(20, 8) NOT NULL
-);
-
-SELECT create_hypertable('token_prices', 'time');
-CREATE INDEX idx_token_prices_token ON token_prices(token_id, time DESC);
-
--- User portfolio snapshots (daily)
-CREATE TABLE portfolio_snapshots (
-    time TIMESTAMPTZ NOT NULL,
-    user_id UUID NOT NULL,
-    vault_id UUID NOT NULL,
-    shares DECIMAL(30, 18),
-    value_usd DECIMAL(20, 2),
-    cost_basis_usd DECIMAL(20, 2),
-    pnl_usd DECIMAL(20, 2),
-    pnl_percentage DECIMAL(10, 4)
-);
-
-SELECT create_hypertable('portfolio_snapshots', 'time');
-CREATE INDEX idx_portfolio_snapshots_user ON portfolio_snapshots(user_id, time DESC);
-
--- =====================
--- RETENTION POLICIES
--- =====================
-
--- Keep detailed metrics for 90 days, then downsample
-SELECT add_retention_policy('strategy_metrics', INTERVAL '90 days');
-SELECT add_retention_policy('token_prices', INTERVAL '90 days');
-
--- Keep vault metrics for 1 year
-SELECT add_retention_policy('vault_metrics', INTERVAL '365 days');
-
--- Keep portfolio snapshots for 2 years
-SELECT add_retention_policy('portfolio_snapshots', INTERVAL '730 days');
-
--- =====================
--- CONTINUOUS AGGREGATES (for faster queries)
--- =====================
-
--- Hourly strategy metrics
-CREATE MATERIALIZED VIEW strategy_metrics_hourly
-WITH (timescaledb.continuous) AS
-SELECT
-    time_bucket('1 hour', time) AS bucket,
-    strategy_id,
-    AVG(apy) as avg_apy,
-    AVG(total_apy) as avg_total_apy,
-    AVG(tvl_usd) as avg_tvl,
-    MAX(tvl_usd) as max_tvl,
-    MIN(tvl_usd) as min_tvl
-FROM strategy_metrics
-GROUP BY bucket, strategy_id;
-
--- Daily strategy metrics
-CREATE MATERIALIZED VIEW strategy_metrics_daily
-WITH (timescaledb.continuous) AS
-SELECT
-    time_bucket('1 day', time) AS bucket,
-    strategy_id,
-    AVG(apy) as avg_apy,
-    AVG(total_apy) as avg_total_apy,
-    AVG(tvl_usd) as avg_tvl,
-    MAX(tvl_usd) as max_tvl,
-    MIN(tvl_usd) as min_tvl,
-    FIRST(apy, time) as open_apy,
-    LAST(apy, time) as close_apy
-FROM strategy_metrics
-GROUP BY bucket, strategy_id;
+    await this.prisma.vaultSnapshot.deleteMany({
+      where: { timestamp: { lt: oneYearAgo } },
+    });
+  }
+}
 ```
+
+### Ponder Tables (Auto-Generated)
+
+Ponder automatically creates and manages these tables:
+- `ponder.VaultDeposit` - All deposit events
+- `ponder.VaultWithdraw` - All withdrawal events
+- `ponder.UserPosition` - Computed positions
+- `ponder.VaultSnapshot` - Periodic vault state
+
+The API service reads from Ponder tables for real-time on-chain data.
 
 ---
 
@@ -957,65 +1062,126 @@ Using **Factory Pattern** with Veda's Boring Vault as base:
 
 ## Deployment
 
-### AWS Infrastructure
+### Simplified Infrastructure (Railway/Render)
+
+We use simple PaaS platforms instead of AWS to minimize cost and operational complexity.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        AWS REGION                                │
+│                     RAILWAY / RENDER                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                        VPC                               │    │
-│  │  ┌─────────────────┐        ┌─────────────────┐         │    │
-│  │  │  Public Subnet  │        │  Public Subnet  │         │    │
-│  │  │    (AZ-1)       │        │    (AZ-2)       │         │    │
-│  │  │  ┌───────────┐  │        │  ┌───────────┐  │         │    │
-│  │  │  │    ALB    │  │        │  │    ALB    │  │         │    │
-│  │  │  └───────────┘  │        │  └───────────┘  │         │    │
-│  │  └─────────────────┘        └─────────────────┘         │    │
-│  │                                                          │    │
-│  │  ┌─────────────────┐        ┌─────────────────┐         │    │
-│  │  │ Private Subnet  │        │ Private Subnet  │         │    │
-│  │  │    (AZ-1)       │        │    (AZ-2)       │         │    │
-│  │  │                 │        │                 │         │    │
-│  │  │  ┌───────────┐  │        │  ┌───────────┐  │         │    │
-│  │  │  │ECS Fargate│  │        │  │ECS Fargate│  │         │    │
-│  │  │  │ Services  │  │        │  │ Services  │  │         │    │
-│  │  │  └───────────┘  │        │  └───────────┘  │         │    │
-│  │  └─────────────────┘        └─────────────────┘         │    │
-│  │                                                          │    │
-│  │  ┌─────────────────┐        ┌─────────────────┐         │    │
-│  │  │  Data Subnet    │        │  Data Subnet    │         │    │
-│  │  │    (AZ-1)       │        │    (AZ-2)       │         │    │
-│  │  │                 │        │                 │         │    │
-│  │  │  ┌───────────┐  │        │  ┌───────────┐  │         │    │
-│  │  │  │    RDS    │  │        │  │   Redis   │  │         │    │
-│  │  │  │ (Primary) │◄─┼────────┼─►│ElastiCache│  │         │    │
-│  │  │  └───────────┘  │        │  └───────────┘  │         │    │
-│  │  └─────────────────┘        └─────────────────┘         │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                     SERVICES                               │  │
+│  │                                                            │  │
+│  │  ┌─────────────────┐      ┌─────────────────────────────┐ │  │
+│  │  │   API Service   │      │     Ponder Indexer          │ │  │
+│  │  │   (NestJS)      │      │     (TypeScript)            │ │  │
+│  │  │                 │      │                             │ │  │
+│  │  │   - REST API    │      │   - Event indexing          │ │  │
+│  │  │   - Cron jobs   │      │   - Position tracking       │ │  │
+│  │  │   - Webhooks    │      │   - Snapshots               │ │  │
+│  │  │                 │      │                             │ │  │
+│  │  │   $20/month     │      │   $20/month                 │ │  │
+│  │  └─────────────────┘      └─────────────────────────────┘ │  │
+│  │                                                            │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │              PostgreSQL Database                     │  │  │
+│  │  │              (Railway/Supabase)                      │  │  │
+│  │  │                                                      │  │  │
+│  │  │              $20-50/month                            │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │   Route 53   │  │     ECR      │  │  CloudWatch  │           │
-│  │    (DNS)     │  │  (Images)    │  │ (Monitoring) │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
+│  Total: ~$60-100/month (vs $500-1000 on AWS)                    │
 │                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │   Secrets    │  │     S3       │  │    WAF       │           │
-│  │   Manager    │  │  (Backups)   │  │ (Security)   │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     SEPARATE HOSTING                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Execution Engine (Go)                       │   │
+│  │              TEE Provider (Fleek/Phala/Custom)          │   │
+│  │                                                          │   │
+│  │              - Requires TEE environment                  │   │
+│  │              - Separate from main infra                  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Environment Configuration
 
-| Environment | Purpose           | Database         | Cache                 |
-| ----------- | ----------------- | ---------------- | --------------------- |
-| Development | Local development | Local PostgreSQL | Local Redis           |
-| Staging     | Testing, QA       | RDS (small)      | ElastiCache (small)   |
-| Production  | Live traffic      | RDS (Multi-AZ)   | ElastiCache (Cluster) |
+| Environment | Purpose           | Platform        | Database               | Cost       |
+| ----------- | ----------------- | --------------- | ---------------------- | ---------- |
+| Development | Local development | Docker Compose  | PostgreSQL (local)     | $0         |
+| Staging     | Testing, QA       | Railway (free)  | Railway PostgreSQL     | $0-20      |
+| Production  | Live traffic      | Railway/Render  | Railway/Supabase PG    | $60-100    |
 
-### CI/CD Pipeline
+### Recommended Platform: Railway
+
+**Why Railway?**
+- Simple GitHub-based deployments
+- Native PostgreSQL support
+- Environment variable management
+- Automatic HTTPS
+- Reasonable pricing ($5/service + usage)
+- Good DX for small teams
+
+**Alternatives:**
+- **Render**: Similar to Railway, slightly cheaper
+- **Fly.io**: Better for global distribution
+- **Supabase**: Good if you want managed Postgres + extras
+
+### Docker Compose (Development)
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/raga
+      - NODE_ENV=development
+    depends_on:
+      - db
+
+  indexer:
+    build:
+      context: .
+      dockerfile: apps/indexer/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/raga
+      - ETH_RPC_URL=${ETH_RPC_URL}
+      - BASE_RPC_URL=${BASE_RPC_URL}
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=raga
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
+```
+
+### CI/CD Pipeline (GitHub Actions)
 
 ```yaml
 # .github/workflows/deploy.yml
@@ -1023,50 +1189,137 @@ name: Deploy
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main]
 
 jobs:
-  build:
+  deploy-api:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker images
-      - name: Push to ECR
-      - name: Update ECS service
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Deploy to Railway
+        uses: railwayapp/railway-action@v1
+        with:
+          service: api
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  deploy-indexer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Ponder to Railway
+        uses: railwayapp/railway-action@v1
+        with:
+          service: indexer
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 ```
+
+### Environment Variables
+
+```bash
+# .env.example
+
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/raga
+
+# RPC URLs (use free tiers)
+ETH_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
+BSC_RPC_URL=https://bsc-dataseed1.binance.org
+ARB_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+
+# API Config
+PORT=3000
+NODE_ENV=production
+
+# External APIs
+DEFILLAMA_API_URL=https://api.llama.fi
+COINGECKO_API_URL=https://api.coingecko.com/api/v3
+
+# Monitoring (optional)
+SENTRY_DSN=your_sentry_dsn
+```
+
+### Scaling Path
+
+When you need to scale beyond the simplified setup:
+
+1. **Add Redis**: When in-memory cache becomes insufficient
+2. **Add read replicas**: When database becomes bottleneck
+3. **Move to Kubernetes**: When you need auto-scaling
+4. **Add CDN**: When you need global distribution
+
+For now, start simple and scale when needed.
 
 ---
 
 ## Next Steps
 
 1. **Phase 1**: Core Backend Setup
+   - [ ] Set up monorepo with Turborepo + pnpm
+   - [ ] Initialize NestJS API service
+   - [ ] Set up Prisma with PostgreSQL
+   - [ ] Implement protocol data fetchers (TypeScript)
+   - [ ] Set up in-memory caching
 
-   - [ ] Set up AWS infrastructure (VPC, RDS, ElastiCache, ECS)
-   - [ ] Implement API service with core endpoints
-   - [ ] Build data aggregation service with protocol scrapers
+2. **Phase 2**: Ponder Indexer
+   - [ ] Set up Ponder project
+   - [ ] Define schema for vault events
+   - [ ] Implement event handlers
+   - [ ] Connect to multi-chain RPCs
 
-2. **Phase 2**: Vault System
-
+3. **Phase 3**: Vault System
    - [ ] Develop vault factory smart contracts
-   - [ ] Implement vault deployer bot
-   - [ ] Build execution engine
+   - [ ] Integrate vault deployment into API
+   - [ ] Build execution engine (Go/TEE)
 
-3. **Phase 3**: SDK Development
-
+4. **Phase 4**: SDK Development
    - [ ] Design SDK architecture
    - [ ] Implement core modules
    - [ ] Write documentation and examples
 
-4. **Phase 4**: Testing & Launch
+5. **Phase 5**: Testing & Launch
    - [ ] Integration testing
    - [ ] Security audit
-   - [ ] Testnet deployment
-   - [ ] Mainnet launch
+   - [ ] Testnet deployment (Railway staging)
+   - [ ] Production deployment
+
+---
+
+## Architecture Summary
+
+| Previous Architecture | Simplified Architecture |
+|-----------------------|------------------------|
+| 5 services (API, Python scrapers, Portfolio tracker, Vault bot, Execution engine) | 3 services (API, Ponder indexer, Execution engine) |
+| Python + TypeScript + Go | TypeScript + Go only |
+| PostgreSQL + TimescaleDB + Redis | PostgreSQL only |
+| AWS ECS + RDS + ElastiCache | Railway/Render |
+| ~$500-1000/month | ~$60-100/month |
+
+**Key Trade-offs:**
+- Slower data refresh (10-15 min vs 5 min) - acceptable for yield data
+- Single instance vs auto-scaling - sufficient for early stage
+- In-memory cache vs Redis - can add Redis later if needed
 
 ---
 
 ## References
 
+- [Ponder Documentation](https://ponder.sh/docs)
 - [DeFiLlama API](https://defillama.com/docs/api)
 - [vaults.fyi Documentation](https://docs.vaults.fyi)
 - [Morpho API](https://docs.morpho.org/tools/offchain/api/get-started/)
@@ -1075,3 +1328,4 @@ jobs:
 - [Lido API](https://docs.lido.fi/integrations/api/)
 - [Spectra Developer Docs](https://dev.spectra.finance/)
 - [Veda Boring Vault](https://docs.vaults.fyi)
+- [Railway Documentation](https://docs.railway.app/)
